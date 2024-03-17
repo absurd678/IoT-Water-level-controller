@@ -33,9 +33,15 @@ SoftwareSerial Slave(D6, D7);
 //ПЕРЕМЕННЫЕ
 
 int h, temp, press = -1; // [h] = cm
-bool req_h_sent, req_t_sent, req_p_sent = 0;
+bool req_sent = 0;
+bool h_received, t_received, p_received = 0;
+uint32_t last_service = 0; // Время последнего сеанса протокола
+bool is_service = 0; // Общаемся ли с Нано на данный момент
+//uint32_t curr_time_h = 0; // для millis для считывания высоты
+//uint32_t curr_time_t = 2000; // для millis для считывания темпы
+//uint32_t curr_time_p = 4000; // для millis для считывания давления
 
-//int response = NULL;
+
 // Заряд накопителя, дисплей
 uint8_t ERR = 0;
 uint16_t bat_charge = 0;
@@ -45,9 +51,8 @@ uint16_t bat_min = 400;
 uint16_t bat_range = 221;
 uint8_t sens_mode = 0;
 uint32_t last_picture = 0; // Последний раз, когда меняли экран
-uint32_t curr_time_h = 0; // для millis для считывания высоты
-uint32_t curr_time_t = 2000; // для millis для считывания темпы
-uint32_t curr_time_p = 4000; // для millis для считывания давления
+
+
 uint32_t second_counter = 0;
 char data_mas[100]= {0};
 
@@ -132,56 +137,113 @@ void setup()
 
 void loop()
 {
-    // Ловим высоту
-    if (millis() - curr_time_h > 10000 && !Slave.available())
-    {
-        digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
-        Slave.write('h');
-        curr_time_h = millis();
-        req_h_sent = 1;
-        req_t_sent = 0;
-        req_p_sent = 0;
-    }
-    else if (req_h_sent && Slave.available())
-    {
-        h = Slave.read();
-        curr_time_h = millis();
-        req_h_sent = 0;
-    }
 
-    // Ловим температуру
-    if (millis() - curr_time_t > 10000 && !Slave.available())
-    {
-        digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
-        Slave.write('t');
-        curr_time_t = millis();
-        req_t_sent = 1;
-        req_h_sent = 0;
-        req_p_sent = 0;
-    }
-    else if (req_t_sent && Slave.available())
-    {
-        temp = Slave.read();
-        curr_time_t = millis();
-        req_t_sent = 0;
-    }
+    if (millis() - last_service > 10000) is_service = 1;
 
-    // Ловим давление
-    if (millis() - curr_time_p > 10000 && !Slave.available())
+    if (is_service)
     {
-        digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
-        Slave.write('p');
-        curr_time_p = millis();
-        req_p_sent = 1;
-        req_h_sent = 0;
-        req_t_sent = 0;
-    }
-    else if (req_p_sent && Slave.available())
-    {
-        press = Slave.read();
-        curr_time_p = millis();
-        req_p_sent = 0;
-    }
+        if (!h_received)
+        {
+            if (!req_sent)
+            {
+                Slave.write('h');
+                req_sent = 1;
+            } // if
+            else if(Slave.available())
+            {
+                h = Slave.read();
+                h_received = 1;
+                req_sent = 0;
+            } // else if
+        } // if (!h_received)
+        else if (!t_received)
+        {
+            if (!req_sent)
+            {
+                Slave.write('t');
+                req_sent = 1;
+            } // if
+            else if (Slave.available())
+            {
+                temp = Slave.read();
+                t_received = 1;
+                req_sent = 0;
+            } // else if
+        } // else if
+        else if (!p_received)
+        {
+            if (!req_sent)
+            {
+                Slave.write('h');
+                req_sent = 1;
+            } // if
+            else if (Slave.available())
+            {
+                press = Slave.read();
+                p_received = 1;
+                req_sent = 0;
+            } // else if
+        } // else if
+        else if (h_received && t_received && p_received) // Если все уже получено
+        {// Переводим все в начальное состояние
+            is_service = 0;
+            last_service = millis();
+            req_sent = 0;
+            h_received, t_received, p_received = 0;
+        } // else if 
+    } // if 
+
+
+    //// Ловим высоту
+    //if (millis() - curr_time_h > 10000 && !Slave.available())
+    //{
+    //    digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
+    //    Slave.write('h');
+    //    curr_time_h = millis();
+    //    req_h_sent = 1;
+    //    req_t_sent = 0;
+    //    req_p_sent = 0;
+    //}
+    //else if (req_h_sent && Slave.available())
+    //{
+    //    h = Slave.read();
+    //    curr_time_h = millis();
+    //    req_h_sent = 0;
+    //}
+
+    //// Ловим температуру
+    //if (millis() - curr_time_t > 10000 && !Slave.available())
+    //{
+    //    digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
+    //    Slave.write('t');
+    //    curr_time_t = millis();
+    //    req_t_sent = 1;
+    //    req_h_sent = 0;
+    //    req_p_sent = 0;
+    //}
+    //else if (req_t_sent && Slave.available())
+    //{
+    //    temp = Slave.read();
+    //    curr_time_t = millis();
+    //    req_t_sent = 0;
+    //}
+
+    //// Ловим давление
+    //if (millis() - curr_time_p > 10000 && !Slave.available())
+    //{
+    //    digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
+    //    Slave.write('p');
+    //    curr_time_p = millis();
+    //    req_p_sent = 1;
+    //    req_h_sent = 0;
+    //    req_t_sent = 0;
+    //}
+    //else if (req_p_sent && Slave.available())
+    //{
+    //    press = Slave.read();
+    //    curr_time_p = millis();
+    //    req_p_sent = 0;
+    //}
 
     digitalWrite(enablePin, LOW); // Делаем вемос опять слейвом
 
