@@ -7,6 +7,7 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <Wire.h>
+#include <SoftwareSerial.h>
 
 // SD1306
 #include <SPI.h>
@@ -27,11 +28,14 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 WiFiClient espClient;
 PubSubClient client(espClient);
-
+SoftwareSerial Slave(D6, D7);
 
 //ПЕРЕМЕННЫЕ
 
-int h; // [h] = cm
+int h, temp, press = -1; // [h] = cm
+bool req_h_sent, req_t_sent, req_p_sent = 0;
+
+//int response = NULL;
 // Заряд накопителя, дисплей
 uint8_t ERR = 0;
 uint16_t bat_charge = 0;
@@ -40,10 +44,10 @@ uint16_t bat_max = 621;
 uint16_t bat_min = 400;
 uint16_t bat_range = 221;
 uint8_t sens_mode = 0;
-uint8_t is_display = 1;
-uint16_t display_on_time = 30000;
-uint32_t display_on_time_begin = 0;
-uint32_t current_time = 0;
+uint32_t last_picture = 0; // Последний раз, когда меняли экран
+uint32_t curr_time_h = 0; // для millis для считывания высоты
+uint32_t curr_time_t = 2000; // для millis для считывания темпы
+uint32_t curr_time_p = 4000; // для millis для считывания давления
 uint32_t second_counter = 0;
 char data_mas[100]= {0};
 
@@ -70,6 +74,7 @@ void display_wifi_disconnect();
 void display_wifi_init();
 void display_error(uint8_t ERR);
 void display_height_value(float height);
+void display_height_invalid(); // Вывести на дисплей "NO HEIGHT RECEIVED"
 void calc_charge(); // Уровень заряда
 void display_charge();
 void display_hello();
@@ -79,46 +84,47 @@ void display_hello();
 
 void setup()
 {
-  Serial.begin(9600);
-  while (!Serial);  
+    Serial.begin(9600);
+    Slave.begin(9600);
+    while (!Serial);  
 
-  Wire.begin();
-  Wire.setClock(400000);
-  delay(10);
+    Wire.begin();
+    Wire.setClock(400000);
+    delay(10);
 
-  // Настройка пина RS485
-  pinMode(enablePin, OUTPUT);
-  delay(10);
-  digitalWrite(enablePin, LOW);        //  (Pin 8 always LOW to receive value from Master)
+    // Настройка пина RS485
+    pinMode(enablePin, OUTPUT);
+    delay(10);
+    digitalWrite(enablePin, LOW);        //  (Pin 8 always LOW to receive value from Master)
   
-  // Настройка дисплея
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) // Address 0x3D or 0x3C for 128x64
-    ERR |= (1<<0); // Если дисплей не подключен
-  else
-  {
-    display.clearDisplay();
-    display.display();
-  }
-  delay(250);
+    // Настройка дисплея
+    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) // Address 0x3D or 0x3C for 128x64
+        ERR |= (1<<0); // Если дисплей не подключен
+    else
+    {
+        display.clearDisplay();
+        display.display();
+    }
+    delay(250);
   
-  if (ERR) // Обработка ошибок
-  {
-    Serial.println(ERR);
-    if (!(ERR & 0x01))
-      display_error(ERR);
-    while(1);
-  }  
+    if (ERR) // Обработка ошибок
+    {
+        Serial.println(ERR);
+        if (!(ERR & 0x01))
+            display_error(ERR);
+        while(1);
+    }  
   
-  // Настройка соединения
-  delay(cycleTime);
-  display_wifi_init();
-  setup_wifi();
-  delay(10);
-  if (WL_STATUS == 1)
-  {
-    client.setServer(mqtt_server, client_port); // Установка соединения с сервером
-    client.setCallback(callback); // Установка функции обработки подписок  
-  }             
+    // Настройка соединения
+    delay(cycleTime);
+    display_wifi_init();
+    setup_wifi();
+    delay(10);
+    if (WL_STATUS == 1)
+    {
+        client.setServer(mqtt_server, client_port); // Установка соединения с сервером
+        client.setCallback(callback); // Установка функции обработки подписок  
+    }             
 
 }
 
@@ -126,51 +132,87 @@ void setup()
 
 void loop()
 {
-  h = Serial.parseInt(); // Читаем высоту с платы MAX485
-
-  if (millis() - current_time > 1000)
-  {
-      sprintf(data_mas, "%d", h); // высоту делаем строкой
-      client.publish(s_publish, data_mas); // отправка на сервер
-    current_time = millis();
-    if (is_display)
+    // Ловим высоту
+    if (millis() - curr_time_h > 10000 && !Slave.available())
     {
-      if (sens_mode == 0) 
-        display_height_value(h);
-      else if (sens_mode == 1)
-        display_charge();
+        digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
+        Slave.write('h');
+        curr_time_h = millis();
+        req_h_sent = 1;
+        req_t_sent = 0;
+        req_p_sent = 0;
+    }
+    else if (req_h_sent && Slave.available())
+    {
+        h = Slave.read();
+        curr_time_h = millis();
+        req_h_sent = 0;
     }
 
-  }
+    // Ловим температуру
+    if (millis() - curr_time_t > 10000 && !Slave.available())
+    {
+        digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
+        Slave.write('t');
+        curr_time_t = millis();
+        req_t_sent = 1;
+        req_h_sent = 0;
+        req_p_sent = 0;
+    }
+    else if (req_t_sent && Slave.available())
+    {
+        temp = Slave.read();
+        curr_time_t = millis();
+        req_t_sent = 0;
+    }
 
-  if (digitalRead(BUT) && (is_display))
-  {
-    
-    sens_mode ++;
-    if (sens_mode > 1)
-      sens_mode = 0;
-    //display_on_time_begin = millis(); Я хз но так раз в 30 секунд экран меняется
-  }
-  else if (digitalRead(BUT) && (!is_display))
-  {
-    display_on_time_begin = millis();
-    is_display = 1;
-  }
+    // Ловим давление
+    if (millis() - curr_time_p > 10000 && !Slave.available())
+    {
+        digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
+        Slave.write('p');
+        curr_time_p = millis();
+        req_p_sent = 1;
+        req_h_sent = 0;
+        req_t_sent = 0;
+    }
+    else if (req_p_sent && Slave.available())
+    {
+        press = Slave.read();
+        curr_time_p = millis();
+        req_p_sent = 0;
+    }
 
-  if (millis() - display_on_time_begin > display_on_time)
-  {
-    is_display = 0;
-    display.clearDisplay();
-    display.display();
-  }
-    
-  if (WL_STATUS == 1)
-  {
-    if (!client.connected())
-    { reconnect(); }
-    else client.loop();
-      
-  }
+    digitalWrite(enablePin, LOW); // Делаем вемос опять слейвом
+
+    if (millis() - last_picture > 5000) // Смена дисплея
+    {
+        if (sens_mode == 0)
+            display_height_value(h);
+        else if (sens_mode == 1)
+            display_charge();
+        last_picture = millis();
+        // Сменить картинку
+        sens_mode++;
+        if (sens_mode > 1)
+            sens_mode = 0;
+    }
+   
+  
+    if (WL_STATUS == 1)
+    {
+        if (!client.connected())
+        { 
+            reconnect(); 
+        }
+        else 
+        { 
+            client.loop(); 
+            
+            sprintf(data_mas, "%d", h); // высоту делаем строкой
+            client.publish(s_publish, data_mas); // отправка на сервер
+        }
+    }
       
 }
 
@@ -222,8 +264,6 @@ void setup_wifi() //Соединение по WiFi
 void reconnect() // Переподключение
 {
   uint8_t WL_CURRENT_TIMEOUT = 0;
-  display_on_time_begin = millis();
-  is_display = 1;
   display_wifi_reconnect();
   while ((!client.connected())&&(WL_CURRENT_TIMEOUT < 20)) {
     // Attempt to connect
@@ -306,6 +346,12 @@ void display_error(uint8_t ERR) {
 }
 
 void display_height_value(float height) {
+
+    if (height == -1) {
+        display_height_invalid(); 
+        return;
+    }
+
   display.clearDisplay();
   display.setTextSize(3);
   display.setTextColor(WHITE); 
@@ -341,6 +387,16 @@ void display_height_value(float height) {
     display_wifi_disconnect();
   display.display();
 }
+
+void display_height_invalid()
+{
+    display.clearDisplay();
+    display.setTextColor(WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 10);
+    display.println("NO HEIGHT RECEIVED");
+    display.display();
+} // display_height_invalid
 
 void calc_charge()
 {

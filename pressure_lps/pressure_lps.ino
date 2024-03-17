@@ -1,5 +1,6 @@
 #include <Wire.h> 
 #include <LPS.h> 
+#include <SoftwareSerial.h>
  
  // КОНСТАНТЫ
  // LPS
@@ -15,13 +16,15 @@
 // ПЕРЕМЕННЫЕ
 LPS ps1; // Это нижний датчик - снаружи 
 LPS ps2; // Это верхний - в трубе
+SoftwareSerial Master(10, 11);
 int time_now; 
-float P_atm = 100885; // атмосферное давление  
-float P_tube = 109507.35; // давление в трубе, Па 
+float P_atm; // атмосферное давление  
+float P_tube; // давление в трубе, Па 
 float T_atm; // температура во время измерения снаружи, К
 float T_tube; // температура во время измерения в трубе, К 
 float T_0; // температура во время установки устройства, К 
 int h; // высота столба жидкости в резервуаре, cm
+char request;
 
 // ПРОТОТИПЫ ФУНКЦИЙ
 float calch(float P_out, float P_in, float T_out, float T_in, float T_install); // Вычисление высоты
@@ -30,8 +33,8 @@ void getValues(float& P_out, float& T_out, float& P_in, float& T_in); // Изм�
 // ГЛАВНАЯ ПРОГРАММА 
 void setup() 
 { 
-  Serial.begin(9600); 
-
+  Serial.begin(9600);
+  Master.begin(9600);
   // Настройка датчиков
   Wire.begin(); 
   ps1.init(LPS::device_25H, LPS::sa0_low); // пин наружного датчика к земле
@@ -45,19 +48,35 @@ void setup()
   // Настройка пина для передачи по RS485
   pinMode(TransimissPin, OUTPUT); 
   delay(10); 
-  digitalWrite(TransimissPin, HIGH);  //  (always high as Master Writes data to Slave)
+  digitalWrite(TransimissPin, HIGH);  
 
-  time_now = millis(); 
 } // setup
  
 void loop() 
 { 
-  if(time_now - millis() >= 100) 
+  if(ps1.init() && ps2.init()) 
   { 
     getValues(P_atm, T_atm, P_tube, T_tube);
     h = round(calch(P_atm, P_tube, T_atm, T_tube, T_0)); 
-    Serial.println(h); // Отправка на вемос 
-    time_now = millis(); 
+
+    digitalWrite(TransimissPin, LOW); // Делаем нано слейвом
+    if (Master.available()) 
+    {
+        request = char(Master.read());
+        digitalWrite(TransimissPin, HIGH); // Делаем нано боссом
+        switch (request)
+        {
+        case 'h': 
+            Master.write(1);
+            break;
+        case 't':
+            Master.write(2);
+            break;
+        case 'p':
+            Master.write(3);
+            break;
+        }
+    } // Отправка на вемос 
   } 
 } // loop
 
@@ -87,10 +106,10 @@ float calch(float P_out, float P_in, float T_out, float T_in, float T_install)
 void getValues(float& P_out, float& T_out, float& P_in, float& T_in) 
 {
   delay(sensorUpdateTime); 
-  //P_out = ps1.readPressureMillibars()*100;
+  P_out = ps1.readPressureMillibars()*100;
   T_out = ps1.readTemperatureC() + 273.15;
   delay(pauseBtSensors);
-  //P_in = ps2.readPressureMillibars()*100;
+  P_in = ps2.readPressureMillibars()*100;
   T_in = ps1.readTemperatureC() + 273.15;
 }
 
