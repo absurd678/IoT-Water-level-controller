@@ -34,8 +34,8 @@ SoftwareSerial Slave(D6, D7);
 
 int h, temp, press = -1; // [h] = cm
 bool req_sent = 0;
-bool h_received, t_received, p_received = 0;
-uint32_t last_service = 0; // Время последнего сеанса протокола
+bool h_received = 0; bool t_received = 0; bool p_received = 0;
+uint32_t last_service = 15000; // Время последнего сеанса протокола
 bool is_service = 0; // Общаемся ли с Нано на данный момент
 //uint32_t curr_time_h = 0; // для millis для считывания высоты
 //uint32_t curr_time_t = 2000; // для millis для считывания темпы
@@ -146,6 +146,7 @@ void loop()
         {
             if (!req_sent)
             {
+                digitalWrite(enablePin, HIGH);
                 Slave.write('h');
                 req_sent = 1;
             } // if
@@ -160,12 +161,13 @@ void loop()
         {
             if (!req_sent)
             {
+                digitalWrite(enablePin, HIGH); delay(1000);
                 Slave.write('t');
                 req_sent = 1;
             } // if
             else if (Slave.available())
             {
-                temp = Slave.read();
+                temp = map(Slave.read(), 0, 255, 0, 296);
                 t_received = 1;
                 req_sent = 0;
             } // else if
@@ -174,12 +176,13 @@ void loop()
         {
             if (!req_sent)
             {
-                Slave.write('h');
+                digitalWrite(enablePin, HIGH); delay(1000);
+                Slave.write('p');
                 req_sent = 1;
             } // if
             else if (Slave.available())
             {
-                press = Slave.read();
+                press = map(Slave.read(), 0, 255, 100432, 100450);
                 p_received = 1;
                 req_sent = 0;
             } // else if
@@ -189,7 +192,7 @@ void loop()
             is_service = 0;
             last_service = millis();
             req_sent = 0;
-            h_received, t_received, p_received = 0;
+            h_received = 0; t_received = 0; p_received = 0;
         } // else if 
     } // if 
 

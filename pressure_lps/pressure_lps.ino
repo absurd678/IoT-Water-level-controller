@@ -29,6 +29,8 @@ char request;
 // ПРОТОТИПЫ ФУНКЦИЙ
 float calch(float P_out, float P_in, float T_out, float T_in, float T_install); // Вычисление высоты
 void getValues(float& P_out, float& T_out, float& P_in, float& T_in); // Измерения
+int temp_constrain(int temp);
+int press_constrain(int press, int press_min);
 
 // ГЛАВНАЯ ПРОГРАММА 
 void setup() 
@@ -67,13 +69,13 @@ void loop()
         switch (request)
         {
         case 'h': 
-            Master.write(1);
+            Master.write(h);
             break;
         case 't':
-            Master.write(2);
+            Master.write(temp_constrain(T_tube));
             break;
         case 'p':
-            Master.write(3);
+            Master.write(press_constrain(P_tube, P_atm));
             break;
         }
     } // Отправка на вемос 
@@ -113,3 +115,11 @@ void getValues(float& P_out, float& T_out, float& P_in, float& T_in)
   T_in = ps1.readTemperatureC() + 273.15;
 }
 
+int temp_constrain(int temp)
+{
+    return map(temp, 0, 296, 0, 255);
+}
+int press_constrain(int press, int press_min)
+{
+    return map(press, press_min, 100450, 0, 255);
+}
