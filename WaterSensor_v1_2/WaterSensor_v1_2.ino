@@ -32,15 +32,13 @@ SoftwareSerial Slave(D6, D7);
 
 //ПЕРЕМЕННЫЕ
 
+// Протокол общения двух плат
 int h, temp, press = -1; // [h] = cm
 bool req_sent = 0;
 bool h_received = 0; bool t_received = 0; bool p_received = 0;
 uint32_t last_service = 15000; // Время последнего сеанса протокола
 bool is_service = 0; // Общаемся ли с Нано на данный момент
-//uint32_t curr_time_h = 0; // для millis для считывания высоты
-//uint32_t curr_time_t = 2000; // для millis для считывания темпы
-//uint32_t curr_time_p = 4000; // для millis для считывания давления
-
+int frequency = 10000; // Частота установки соединения (настраиваемая)
 
 // Заряд накопителя, дисплей
 uint8_t ERR = 0;
@@ -129,7 +127,8 @@ void setup()
     {
         client.setServer(mqtt_server, client_port); // Установка соединения с сервером
         client.setCallback(callback); // Установка функции обработки подписок  
-    }             
+    }          
+    client.subscribe(s_subscribe);
 
 }
 
@@ -138,7 +137,10 @@ void setup()
 void loop()
 {
 
-    if (millis() - last_service > 10000) is_service = 1;
+    if (millis() - last_service > frequency)
+    {
+        is_service = 1;
+    }
 
     if (is_service)
     {
@@ -167,7 +169,7 @@ void loop()
             } // if
             else if (Slave.available())
             {
-                temp = map(Slave.read(), 0, 255, 0, 296);
+                temp = map(Slave.read(), 0, 255, 0, 323);
                 t_received = 1;
                 req_sent = 0;
             } // else if
@@ -182,7 +184,7 @@ void loop()
             } // if
             else if (Slave.available())
             {
-                press = map(Slave.read(), 0, 255, 100432, 100450);
+                press = map(Slave.read(), 0, 255, 100432, 101000);
                 p_received = 1;
                 req_sent = 0;
             } // else if
@@ -195,58 +197,6 @@ void loop()
             h_received = 0; t_received = 0; p_received = 0;
         } // else if 
     } // if 
-
-
-    //// Ловим высоту
-    //if (millis() - curr_time_h > 10000 && !Slave.available())
-    //{
-    //    digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
-    //    Slave.write('h');
-    //    curr_time_h = millis();
-    //    req_h_sent = 1;
-    //    req_t_sent = 0;
-    //    req_p_sent = 0;
-    //}
-    //else if (req_h_sent && Slave.available())
-    //{
-    //    h = Slave.read();
-    //    curr_time_h = millis();
-    //    req_h_sent = 0;
-    //}
-
-    //// Ловим температуру
-    //if (millis() - curr_time_t > 10000 && !Slave.available())
-    //{
-    //    digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
-    //    Slave.write('t');
-    //    curr_time_t = millis();
-    //    req_t_sent = 1;
-    //    req_h_sent = 0;
-    //    req_p_sent = 0;
-    //}
-    //else if (req_t_sent && Slave.available())
-    //{
-    //    temp = Slave.read();
-    //    curr_time_t = millis();
-    //    req_t_sent = 0;
-    //}
-
-    //// Ловим давление
-    //if (millis() - curr_time_p > 10000 && !Slave.available())
-    //{
-    //    digitalWrite(enablePin, HIGH); // Делаем вемос отправителем
-    //    Slave.write('p');
-    //    curr_time_p = millis();
-    //    req_p_sent = 1;
-    //    req_h_sent = 0;
-    //    req_t_sent = 0;
-    //}
-    //else if (req_p_sent && Slave.available())
-    //{
-    //    press = Slave.read();
-    //    curr_time_p = millis();
-    //    req_p_sent = 0;
-    //}
 
     digitalWrite(enablePin, LOW); // Делаем вемос опять слейвом
 
@@ -276,6 +226,7 @@ void loop()
             
             sprintf(data_mas, "%d", h); // высоту делаем строкой
             client.publish(s_publish, data_mas); // отправка на сервер
+
         }
     }
       
@@ -333,15 +284,11 @@ void reconnect() // Переподключение
   while ((!client.connected())&&(WL_CURRENT_TIMEOUT < 20)) {
     // Attempt to connect
     if (client.connect(s_client)) {
-      //Serial.println("connected");
       client.publish(s_publish, "connect\n");
       client.subscribe(s_subscribe);
     }
     else
     {
-      //Serial.print("failed, rc=");
-      //Serial.print(client.state());
-      //Serial.println(" try again in 5 seconds");
       WL_CURRENT_TIMEOUT++;
       delay(500);
     }
@@ -353,15 +300,24 @@ void reconnect() // Переподключение
   }
 }
 
-// Отправка h на сервер
+// Получение сообщений в теме WS_IN
 void callback(char* topic, byte* payload, unsigned int length) 
 {
-
-  if (payload[0] == '1')
+    Serial.print("Message received in topic: ");
+    Serial.println(topic);
+    Serial.print("Message:");
+    String message;
+    for (int i = 0; i < length; i++)
+    {
+        message = message + (char)payload[i];
+    }
+    ::frequency = atoi(message.c_str()); // Меняем частоту 
+    Serial.print(::frequency);
+  /*if (payload[0] == '1')
   {
     snprintf (data_mas, 100, "%u,%f,%d\n", millis(), h, bat_charge_percent);
     client.publish(s_publish, data_mas);
-  }
+  }*/
 }
 
 // Дисплей

@@ -117,9 +117,9 @@ void getValues(float& P_out, float& T_out, float& P_in, float& T_in)
 
 int temp_constrain(int temp)
 {
-    return map(temp, 0, 296, 0, 255);
+    return map(temp, 0, 323, 0, 255);
 }
 int press_constrain(int press, int press_min)
 {
-    return map(press, press_min, 100450, 0, 255);
+    return map(press, press_min, 101000, 0, 255);
 }
